@@ -47,6 +47,7 @@ public abstract class TileAutoWorkbenchBase extends TileBC_Neptune implements IT
     public final ItemHandlerSimple invResult;
     public final ItemHandlerSimple invOverflow;
     protected final Map<ItemStackKey, TIntHashSet> itemStackCache;
+    private ItemHandlerSimple invMaterialsCopy = null;
 
     public IRecipe currentRecipe;
     private int progress = 0;
@@ -117,10 +118,21 @@ public abstract class TileAutoWorkbenchBase extends TileBC_Neptune implements IT
         if (currentRecipe == null) {
             return false;
         }
+
         crafting.enableBindings();
         boolean has = currentRecipe.matches(crafting, getWorld());
         crafting.disableBindings();
         return has;
+    }
+
+    private ItemHandlerSimple copyInvMaterials() {
+        ItemHandlerSimple newItemHandler = itemManager.addInvHandler("materials", invMaterials.getSlots(), EnumAccess.INSERT, EnumPipePart.VALUES);
+
+        for(int i = 0; i < invMaterials.getSlots(); ++i) {
+            newItemHandler.setStackInSlot(i, invMaterials.getStackInSlot(i).copy());
+        }
+
+        return newItemHandler;
     }
 
     @Override
@@ -152,12 +164,15 @@ public abstract class TileAutoWorkbenchBase extends TileBC_Neptune implements IT
         // }
     }
 
+
     @Override
     protected void onSlotChange(IItemHandlerModifiable handler, int slot, ItemStack before, ItemStack after) {
         super.onSlotChange(handler, slot, before, after);
         if (handler == invMaterials) {
-            ItemStackKey keyBefore = new ItemStackKey(before);
-            ItemStackKey keyAfter = new ItemStackKey(after);
+
+            ItemStackKey keyBefore = getUnitStack(before);
+            ItemStackKey keyAfter = getUnitStack(after);
+
             if (keyAfter.equals(keyBefore)) return;
             if (itemStackCache.containsKey(keyBefore)) {
                 TIntHashSet set = itemStackCache.get(keyBefore);
@@ -182,6 +197,12 @@ public abstract class TileAutoWorkbenchBase extends TileBC_Neptune implements IT
 
     public void updateRecipe() {
         this.currentRecipe = CraftingUtil.findMatchingRecipe(this.crafting, world);
+    }
+
+    private ItemStackKey getUnitStack(ItemStack stack) {
+        ItemStack newStack = stack.copy();
+        newStack.setCount(1);
+        return new ItemStackKey(newStack);
     }
 
     @Override
@@ -237,12 +258,14 @@ public abstract class TileAutoWorkbenchBase extends TileBC_Neptune implements IT
         }
 
         public void enableBindings() {
+            invMaterialsCopy = copyInvMaterials();
             for (int i = 0; i < craftingSlots.length; i++) {
                 craftingSlots[i] = craftingSlots[i].getBoundVersion();
             }
         }
 
         public void disableBindings() {
+            invMaterialsCopy = null;
             for (int i = 0; i < craftingSlots.length; i++) {
                 craftingSlots[i] = craftingSlots[i].getUnboundVersion();
             }
@@ -334,6 +357,7 @@ public abstract class TileAutoWorkbenchBase extends TileBC_Neptune implements IT
     protected class CraftSlotItemBound extends CraftingSlot {
         protected final CraftSlotItem nonBound;
         protected TIntHashSet boundTo = null;
+        protected ItemStack boundStack = null;
 
         public CraftSlotItemBound(CraftSlotItem from) {
             super(from.slot);
@@ -344,22 +368,32 @@ public abstract class TileAutoWorkbenchBase extends TileBC_Neptune implements IT
             ItemStack wanted = nonBound.get();
             ItemStackKey key = new ItemStackKey(wanted);
             boundTo = itemStackCache.get(key);
+
+            if(boundTo == null){
+                boundStack = StackUtil.EMPTY;
+                return;
+            }
+
+            for (int s : boundTo.toArray()) {
+                if(invMaterialsCopy == null || invMaterialsCopy.getStackInSlot(s) == null) {
+                    boundStack = StackUtil.EMPTY;
+                    return;
+                }
+                if (!invMaterialsCopy.getStackInSlot(s).isEmpty()) {
+                    ItemStack inSlot = invMaterialsCopy.extractItem(s, 1, false);
+                    if (!inSlot.isEmpty()) {
+                        boundStack = inSlot;
+                        return;
+                    }
+                }
+            }
+
+            boundStack = StackUtil.EMPTY;
         }
 
         @Override
         public ItemStack get() {
-            if (boundTo == null) {
-                return StackUtil.EMPTY;
-            }
-            for (int s : boundTo.toArray()) {
-                if (!invMaterials.getStackInSlot(s).isEmpty()) {
-                    ItemStack inSlot = invMaterials.extractItem(s, 1, true);
-                    if (!inSlot.isEmpty()) {
-                        return inSlot;
-                    }
-                }
-            }
-            return StackUtil.EMPTY;
+            return boundStack;
         }
 
         @Override
